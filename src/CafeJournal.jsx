@@ -1,0 +1,690 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import { storageGet, storageSet, storageDelete } from "./storage.js";
+
+const CATEGORIES = ["美式","拿铁","卡布奇诺","Flat White","Dirty","手冲","冷萃","摩卡","特调","其他"];
+const USERS = ["Cyan", "瑶"];
+const DEFAULT_RATINGS = {overall:0,aroma:0,flavor:0,environment:0,value:0,revisit:0};
+const TEMPS = [{k:"hot",label:"🔥 热",color:"#B87333"},{k:"iced",label:"🧊 冰",color:"#6BA0C8"}];
+const SCORE_LABELS = ["","难顶","不咋地","还行","不错","绝了"];
+const SCORE_COLORS = ["","#B0A0A0","#CF8E4E","#D4B347","#6BB86B","#C87E33"];
+const REVISIT_LABELS = ["","不想去了 🫠","还可以去 🤔","还想再去 💜"];
+const REVISIT_COLORS = ["","#B0A0A0","#6BA0C8","#B07ACC"];
+const RATINGS_META = [
+  { key:"overall", label:"综合口味", emoji:"😋", max:5, tier:1 },
+  { key:"aroma", label:"香醇度", emoji:"☕", max:5, tier:2 },
+  { key:"flavor", label:"风味度", emoji:"🍎", max:5, tier:2 },
+  { key:"environment", label:"环境", emoji:"🏠", max:5, tier:1 },
+  { key:"value", label:"性价比", emoji:"💰", max:5, tier:1 },
+  { key:"revisit", label:"再访意愿", emoji:"💜", max:3, tier:1 },
+];
+
+function compress(file) {
+  return new Promise(res => {
+    const r = new FileReader();
+    r.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement("canvas");
+        const s = Math.min(1, 480/img.width);
+        c.width=img.width*s; c.height=img.height*s;
+        c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+        res(c.toDataURL("image/jpeg",0.35));
+      };
+      img.src = e.target.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+
+function entryEmoji(e) {
+  const r = e.ratings||{};
+  if((r.overall||0)<=2 || r.revisit===1) return "😓 ";
+  if((r.overall||0)>=4 || r.revisit===3) return "🥰 ";
+  return "";
+}
+
+function tempEmoji(e) {
+  return e.temp==="iced" ? "🧊 " : e.temp==="hot" ? "🔥 " : "";
+}
+
+function scoreColor(v,max=5) { return max===3 ? (REVISIT_COLORS[v]||"#ddd") : (SCORE_COLORS[v]||"#ddd"); }
+function scoreLabel(v,max=5) { return max===3 ? REVISIT_LABELS[v] : SCORE_LABELS[v]; }
+
+/* ─── Toast ─── */
+function Toast({msg}) {
+  if(!msg) return null;
+  return <div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",
+    background:"#2C1810",color:"#fff",padding:"10px 22px",borderRadius:14,
+    fontSize:13,fontWeight:600,zIndex:999,boxShadow:"0 4px 20px rgba(0,0,0,.2)",
+    animation:"tIn .3s ease"}}>{msg}</div>;
+}
+
+/* ─── Star Rating (tier 1 = big, tier 2 = small) ─── */
+function Stars({value,max=5,onChange,tier=1}) {
+  const [hover,setHover]=useState(0);
+  const big = tier===1;
+  const display = hover||value;
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:big?2:1}}>
+      <div style={{display:"flex",gap:big?2:1}}>
+        {Array.from({length:max},(_,i)=>{
+          const on = i<display;
+          return <button key={i} onClick={()=>onChange?.(i+1)}
+            onMouseEnter={()=>onChange&&setHover(i+1)} onMouseLeave={()=>setHover(0)}
+            style={{width:big?28:18,height:big?28:18,border:"none",background:"none",
+              cursor:onChange?"pointer":"default",fontSize:big?20:13,padding:0,
+              color:on?scoreColor(display,max):"#E0D5CA",
+              transition:"all .15s",transform:on?"scale(1.1)":"scale(.85)",
+              opacity:on?1:.4,lineHeight:1,
+            }}>★</button>;
+        })}
+      </div>
+      {value>0 && <span style={{fontSize:big?12:10,fontWeight:600,
+        color:scoreColor(value,max),marginLeft:4,whiteSpace:"nowrap",
+      }}>{scoreLabel(value,max)}</span>}
+    </div>
+  );
+}
+
+/* ─── Revisit Buttons ─── */
+function RevisitPicker({value,onChange}) {
+  return <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+    {[1,2,3].map(v=><button key={v} onClick={()=>onChange?.(v)} style={{
+      padding:"6px 14px",borderRadius:20,fontSize:12,fontWeight:600,
+      cursor:onChange?"pointer":"default",transition:"all .2s",
+      background:value===v?REVISIT_COLORS[v]:"#F5EDE5",
+      color:value===v?"#fff":"#A09080",
+      border:value===v?`2px solid ${REVISIT_COLORS[v]}`:"2px solid #E8DDD4",
+    }}>{REVISIT_LABELS[v]}</button>)}
+  </div>;
+}
+
+/* ─── Clickable Dots (tier 2 sub-ratings) ─── */
+function ClickDots({value,max=5,onChange}) {
+  const [hover,setHover]=useState(0);
+  const display=hover||value;
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:3}}>
+      <div style={{display:"flex",gap:3}}>
+        {Array.from({length:max},(_,i)=>{
+          const on=i<display;
+          return <button key={i} onClick={()=>onChange?.(i+1)}
+            onMouseEnter={()=>onChange&&setHover(i+1)} onMouseLeave={()=>setHover(0)}
+            style={{width:14,height:14,borderRadius:"50%",border:"none",padding:0,
+              background:on?"#B87333":"#E8DDD4",
+              cursor:onChange?"pointer":"default",transition:"all .15s",
+              transform:on?"scale(1.1)":"scale(.85)",
+            }}/>;
+        })}
+      </div>
+      {value>0 && <span style={{fontSize:10,fontWeight:600,
+        color:"#B87333",marginLeft:3,whiteSpace:"nowrap",
+      }}>{scoreLabel(value,max)}</span>}
+    </div>
+  );
+}
+
+/* ─── Dots (display only) ─── */
+function Dots({value,max=5,size=8}) {
+  return <div style={{display:"flex",gap:2}}>
+    {Array.from({length:max},(_,i)=><div key={i} style={{
+      width:size,height:size,borderRadius:"50%",
+      background:i<value?scoreColor(value,max):"#E8DDD4",transition:"all .2s",
+    }}/>)}
+  </div>;
+}
+
+/* ═══════════════ CARD ═══════════════ */
+function Card({entry,onClick}) {
+  const avg = entry.ratings ? ((entry.ratings.overall||0)).toFixed(0) : "–";
+  return (
+    <div onClick={onClick} style={{background:"#fff",borderRadius:16,overflow:"hidden",
+      boxShadow:"0 2px 16px rgba(44,24,16,.07)",cursor:"pointer",transition:"all .25s",
+      border:"1px solid rgba(184,115,51,.08)",
+    }}
+    onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(44,24,16,.12)";}}
+    onMouseLeave={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="0 2px 16px rgba(44,24,16,.07)";}}
+    >
+      <div style={{height:120,background:entry.image?`url(${entry.image}) center/cover`
+        :"linear-gradient(135deg,#D4A574,#8B6F4E)",position:"relative"}}>
+        <div style={{position:"absolute",bottom:6,left:8,background:"rgba(44,24,16,.6)",
+          backdropFilter:"blur(4px)",borderRadius:16,padding:"2px 8px",
+          color:"#fff",fontSize:10,fontWeight:500}}>{tempEmoji(entry)}{entry.category}</div>
+        <div style={{position:"absolute",bottom:6,right:8,background:"rgba(255,255,255,.85)",
+          borderRadius:16,padding:"2px 8px",color:"#B87333",fontSize:10,fontWeight:600,
+        }}>{entry.author}</div>
+      </div>
+      <div style={{padding:"12px 14px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:6}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,
+              color:"#2C1810",lineHeight:1.25,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+            }}>{entryEmoji(entry)}{entry.shopName}</div>
+            <div style={{fontSize:11,color:"#A08B7A",marginTop:2}}>{entry.date}</div>
+            {entry.station && <div style={{fontSize:10,color:"#B8A898",marginTop:1}}>🚇 {entry.station}</div>}
+          </div>
+          <div style={{background:`linear-gradient(135deg,${scoreColor(entry.ratings?.overall||3)},${scoreColor(Math.min(5,(entry.ratings?.overall||3)+1))})`,
+            color:"#fff",borderRadius:10,padding:"3px 9px",fontSize:15,fontWeight:700,
+            fontFamily:"'Playfair Display',serif",flexShrink:0,
+          }}>{avg}</div>
+        </div>
+        {entry.specificName && <div style={{fontSize:11,color:"#8B7355",marginTop:5,
+          fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+        }}>"{entry.specificName}"</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════ DETAIL ═══════════════ */
+function Detail({entry,entries,onBack,onDelete,onEdit,onAgain}) {
+  const sameShop = entries.filter(e=>e.id!==entry.id && e.shopName===entry.shopName);
+  return (
+    <div style={{minHeight:"100vh",background:"#FBF7F2"}}>
+      <div style={{height:200,background:entry.image?`url(${entry.image}) center/cover`
+        :"linear-gradient(135deg,#D4A574,#8B6F4E)",position:"relative"}}>
+        <button onClick={onBack} style={{position:"absolute",top:14,left:14,
+          background:"rgba(255,255,255,.85)",backdropFilter:"blur(6px)",border:"none",
+          borderRadius:"50%",width:36,height:36,cursor:"pointer",fontSize:16,color:"#2C1810",
+          display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <div style={{position:"absolute",top:14,right:14,display:"flex",gap:6}}>
+          <button onClick={onEdit} style={{background:"rgba(255,255,255,.85)",backdropFilter:"blur(6px)",
+            border:"none",borderRadius:"50%",width:36,height:36,cursor:"pointer",
+            fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
+          <button onClick={onDelete} style={{background:"rgba(180,60,60,.75)",backdropFilter:"blur(6px)",
+            border:"none",borderRadius:"50%",width:36,height:36,cursor:"pointer",
+            fontSize:13,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+        </div>
+        <div style={{position:"absolute",bottom:0,left:0,right:0,
+          background:"linear-gradient(transparent,rgba(44,24,16,.55))",padding:"36px 18px 14px"}}>
+          <div style={{display:"flex",gap:6,marginBottom:4}}>
+            <span style={{background:"rgba(255,255,255,.2)",borderRadius:16,padding:"2px 8px",
+              fontSize:11,color:"#fff"}}>{tempEmoji(entry)}{entry.category}</span>
+            <span style={{background:"rgba(255,255,255,.2)",borderRadius:16,padding:"2px 8px",
+              fontSize:11,color:"#fff"}}>{entry.author}</span>
+          </div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,fontWeight:700,
+            color:"#fff",textShadow:"0 2px 6px rgba(0,0,0,.3)"}}>
+            {entryEmoji(entry)}{entry.shopName}</div>
+          {entry.specificName && <div style={{fontSize:12,color:"rgba(255,255,255,.8)",
+            marginTop:2,fontStyle:"italic"}}>"{entry.specificName}"</div>}
+        </div>
+      </div>
+
+      <div style={{padding:"16px 18px 100px"}}>
+        <div style={{fontSize:12,color:"#A08B7A",marginBottom:4}}>{entry.date}</div>
+        {entry.station && <div style={{fontSize:12,color:"#8B7355",marginBottom:14}}>🚇 {entry.station}</div>}
+
+        <div style={{background:"#fff",borderRadius:16,padding:18,
+          boxShadow:"0 2px 12px rgba(44,24,16,.05)",border:"1px solid rgba(184,115,51,.06)",marginBottom:12}}>
+          {RATINGS_META.map(r=>{
+            const v = entry.ratings?.[r.key]||0;
+            return (
+              <div key={r.key} style={{
+                padding:r.tier===1?"10px 0":"4px 0 4px 24px",
+                borderBottom:r.key!=="revisit"?"1px solid #F5EDE5":"none",
+              }}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:r.tier===1?14:12,color:r.tier===1?"#2C1810":"#8B7355"}}>
+                    {r.emoji} {r.label}
+                  </span>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    {r.key==="revisit"
+                      ? <span style={{fontSize:12,fontWeight:600,color:REVISIT_COLORS[v]}}>{REVISIT_LABELS[v]||"–"}</span>
+                      : <>
+                          <Dots value={v} max={r.max} size={r.tier===1?9:6}/>
+                          <span style={{fontSize:r.tier===1?13:11,fontWeight:600,
+                            color:scoreColor(v,r.max)}}>{v}/{r.max}</span>
+                        </>
+                    }
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {entry.nextDrink && <div style={{background:"#fff",borderRadius:16,padding:14,marginBottom:12,
+          boxShadow:"0 2px 12px rgba(44,24,16,.05)",border:"1px solid rgba(184,115,51,.06)"}}>
+          <span style={{fontSize:12,color:"#A08B7A"}}>下次想喝 →</span>
+          <span style={{fontSize:14,color:"#2C1810",fontWeight:600,marginLeft:6}}>{entry.nextDrink}</span>
+        </div>}
+
+        {entry.notes && <div style={{background:"#fff",borderRadius:16,padding:14,marginBottom:12,
+          boxShadow:"0 2px 12px rgba(44,24,16,.05)",border:"1px solid rgba(184,115,51,.06)"}}>
+          <div style={{fontSize:11,color:"#A08B7A",marginBottom:4,fontWeight:600}}>笔记</div>
+          <div style={{fontSize:13,color:"#5C4A3A",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{entry.notes}</div>
+        </div>}
+
+        <button onClick={onAgain} style={{width:"100%",padding:"14px 0",borderRadius:14,
+          background:"linear-gradient(135deg,#B87333,#D4A574)",color:"#fff",border:"none",
+          fontSize:15,fontWeight:700,cursor:"pointer",marginTop:8,
+          boxShadow:"0 4px 16px rgba(184,115,51,.25)"}}>
+          ☕ 再喝一次
+        </button>
+
+        {sameShop.length>0 && <>
+          <div style={{fontSize:13,fontWeight:700,color:"#2C1810",marginTop:24,marginBottom:10}}>
+            这家店的其他记录
+          </div>
+          {sameShop.map(e=><div key={e.id} style={{background:"#fff",borderRadius:12,padding:"10px 14px",
+            marginBottom:8,boxShadow:"0 1px 6px rgba(44,24,16,.04)",
+            border:"1px solid rgba(184,115,51,.06)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#2C1810"}}>{entryEmoji(e)}{e.specificName||e.category}</div>
+              <div style={{fontSize:11,color:"#A08B7A"}}>{e.date} · {e.author}</div>
+            </div>
+            <Dots value={e.ratings?.overall||0} max={5} size={7}/>
+          </div>)}
+        </>}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════ ADD / EDIT FORM ═══════════════ */
+function Form({initial,onSave,onBack,currentUser,isEdit}) {
+  const fileRef = useRef();
+  // 合并默认值，保证 form 永远是完整结构。
+  // 关键修复：「再喝一次」传进来的 initial 只有店名/地铁站等几项，
+  // 没有 ratings —— 不补全的话渲染评分时会读到 undefined 直接崩溃白屏。
+  const [form,setForm] = useState(() => ({
+    shopName:"",category:"拿铁",specificName:"",station:"",notes:"",
+    image:null,author:currentUser,nextDrink:"",temp:"hot",
+    ...(initial||{}),
+    ratings:{...DEFAULT_RATINGS, ...((initial&&initial.ratings)||{})},
+  }));
+  const [saving,setSaving] = useState(false);
+  const [ratingToast,setRatingToast] = useState("");
+
+  const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+  const setR=(k,v)=>{
+    setForm(p=>({...p,ratings:{...p.ratings,[k]:v}}));
+    const meta = RATINGS_META.find(m=>m.key===k);
+    if(meta) {
+      const label = meta.max===3 ? REVISIT_LABELS[v] : SCORE_LABELS[v];
+      if(label) { setRatingToast(`${meta.emoji} ${label}`); setTimeout(()=>setRatingToast(""),1200); }
+    }
+  };
+
+  async function handleImg(e) {
+    const f=e.target.files?.[0]; if(!f) return;
+    const c = await compress(f); set("image",c);
+  }
+
+  async function handleSave() {
+    if(!form.shopName.trim()) return;
+    setSaving(true);
+    const entry = isEdit ? {...form} : {
+      ...form, id: Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+      date: new Date().toLocaleDateString("zh-CN",{year:"numeric",month:"long",day:"numeric"}),
+    };
+    await onSave(entry);
+    setSaving(false);
+  }
+
+  const inp = {width:"100%",padding:"10px 14px",border:"1.5px solid #E0D5CA",
+    borderRadius:10,fontSize:14,color:"#2C1810",outline:"none",
+    background:"#FEFCFA",boxSizing:"border-box",transition:"border-color .2s"};
+
+  return (
+    <div style={{minHeight:"100vh",background:"#FBF7F2"}}>
+      {ratingToast && <Toast msg={ratingToast}/>}
+      <div style={{padding:"14px 18px",display:"flex",alignItems:"center",
+        justifyContent:"space-between",borderBottom:"1px solid #F0E8DF",
+        background:"rgba(251,247,242,.95)",backdropFilter:"blur(8px)",
+        position:"sticky",top:0,zIndex:10}}>
+        <button onClick={onBack} style={{background:"none",border:"none",fontSize:15,
+          cursor:"pointer",color:"#B87333",fontWeight:600}}>← 返回</button>
+        <span style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,
+          color:"#2C1810"}}>{isEdit?"编辑":"新的一杯"}</span>
+        <button onClick={handleSave} disabled={saving||!form.shopName.trim()} style={{
+          background:form.shopName.trim()?"linear-gradient(135deg,#B87333,#D4A574)":"#E0D5CA",
+          color:"#fff",border:"none",borderRadius:20,padding:"6px 16px",
+          fontSize:13,fontWeight:600,cursor:form.shopName.trim()?"pointer":"default",
+        }}>{saving?"…":"保存"}</button>
+      </div>
+
+      <div style={{padding:18}}>
+        {/* Image */}
+        <div style={{position:"relative",marginBottom:18}}>
+          <div onClick={()=>fileRef.current?.click()} style={{
+            height:150,borderRadius:14,overflow:"hidden",cursor:"pointer",
+            background:form.image?`url(${form.image}) center/cover`:"linear-gradient(135deg,#E8DDD4,#D4C8BB)",
+            display:"flex",alignItems:"center",justifyContent:"center",
+            border:"2px dashed #C8B9A8",
+          }}>
+            {!form.image && <div style={{textAlign:"center",color:"#A08B7A"}}>
+              <div style={{fontSize:26,marginBottom:2}}>📷</div>
+              <div style={{fontSize:12}}>点击上传照片</div>
+            </div>}
+          </div>
+          {form.image && <button onClick={(e)=>{e.stopPropagation();set("image",null);}} style={{
+            position:"absolute",top:8,right:8,background:"rgba(180,60,60,.8)",
+            border:"none",borderRadius:"50%",width:28,height:28,cursor:"pointer",
+            color:"#fff",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",
+          }}>✕</button>}
+          <input ref={fileRef} type="file" accept="image/*" onChange={handleImg} style={{display:"none"}}/>
+        </div>
+
+        {/* Shop name */}
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:5,display:"block"}}>店名 *</label>
+          <input value={form.shopName} onChange={e=>set("shopName",e.target.value)}
+            placeholder="叫什么名字" style={inp}
+            onFocus={e=>e.target.style.borderColor="#B87333"}
+            onBlur={e=>e.target.style.borderColor="#E0D5CA"}/>
+        </div>
+
+        {/* Category + name */}
+        <div style={{display:"flex",gap:10,marginBottom:14}}>
+          <div style={{flex:1}}>
+            <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:5,display:"block"}}>品类</label>
+            <select value={form.category} onChange={e=>set("category",e.target.value)}
+              style={{...inp,appearance:"none",cursor:"pointer"}}>
+              {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div style={{flex:1}}>
+            <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:5,display:"block"}}>
+              具体名称 <span style={{fontWeight:400,color:"#C0B0A0"}}>选填</span></label>
+            <input value={form.specificName} onChange={e=>set("specificName",e.target.value)}
+              placeholder="冰摇燕麦拿铁" style={inp}
+              onFocus={e=>e.target.style.borderColor="#B87333"}
+              onBlur={e=>e.target.style.borderColor="#E0D5CA"}/>
+          </div>
+        </div>
+
+        {/* Hot / Iced */}
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:5,display:"block"}}>温度</label>
+          <div style={{display:"flex",gap:8}}>
+            {TEMPS.map(t=>{
+              const on = form.temp===t.k;
+              return <button key={t.k} onClick={()=>set("temp",t.k)} style={{
+                flex:1,padding:"9px 0",borderRadius:10,fontSize:14,fontWeight:600,
+                cursor:"pointer",transition:"all .2s",
+                background:on?t.color:"#F5EDE5",
+                color:on?"#fff":"#8B7355",
+                border:on?`1.5px solid ${t.color}`:"1.5px solid #E0D5CA",
+              }}>{t.label}</button>;
+            })}
+          </div>
+        </div>
+
+        {/* Station */}
+        <div style={{marginBottom:18}}>
+          <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:5,display:"block"}}>
+            🚇 最近地铁站 <span style={{fontWeight:400,color:"#C0B0A0"}}>选填</span></label>
+          <input value={form.station} onChange={e=>set("station",e.target.value)}
+            placeholder="XX站" style={inp}
+            onFocus={e=>e.target.style.borderColor="#B87333"}
+            onBlur={e=>e.target.style.borderColor="#E0D5CA"}/>
+        </div>
+
+        {/* Ratings */}
+        <div style={{background:"#fff",borderRadius:14,padding:16,marginBottom:14,
+          boxShadow:"0 2px 10px rgba(44,24,16,.04)",border:"1px solid rgba(184,115,51,.06)"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#2C1810",marginBottom:12,letterSpacing:1}}>评分</div>
+          {RATINGS_META.map((r,i)=>(
+            <div key={r.key} style={{
+              padding:r.tier===1?"10px 0":"6px 0 6px 20px",
+              borderBottom:i<RATINGS_META.length-1?"1px solid #F5EDE5":"none",
+            }}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:r.tier===1?13:12,fontWeight:r.tier===1?600:500,
+                  color:r.tier===1?"#2C1810":"#8B7355"}}>
+                  {r.emoji} {r.label}
+                </span>
+                {r.key==="revisit"
+                  ? <RevisitPicker value={form.ratings.revisit} onChange={v=>setR("revisit",v)}/>
+                  : r.tier===2
+                    ? <ClickDots value={form.ratings[r.key]} max={r.max} onChange={v=>setR(r.key,v)}/>
+                    : <Stars value={form.ratings[r.key]} max={r.max} onChange={v=>setR(r.key,v)} tier={r.tier}/>
+                }
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Next drink (if revisit >= 3) */}
+        {form.ratings.revisit>=3 && <div style={{marginBottom:14,
+          animation:"tIn .3s ease"}}>
+          <label style={{fontSize:11,fontWeight:600,color:"#B07ACC",marginBottom:5,display:"block"}}>
+            💜 下次想喝的是...</label>
+          <input value={form.nextDrink} onChange={e=>set("nextDrink",e.target.value)}
+            placeholder="下回试试..." style={{...inp,borderColor:"#D4C0E8"}}
+            onFocus={e=>e.target.style.borderColor="#B07ACC"}
+            onBlur={e=>e.target.style.borderColor="#D4C0E8"}/>
+        </div>}
+
+        {/* Notes */}
+        <div style={{marginBottom:18}}>
+          <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:5,display:"block"}}>
+            笔记 <span style={{fontWeight:400,color:"#C0B0A0"}}>选填</span></label>
+          <textarea value={form.notes} onChange={e=>set("notes",e.target.value)}
+            placeholder="想记下什么..." rows={3}
+            style={{...inp,resize:"vertical",fontFamily:"inherit",lineHeight:1.6}}
+            onFocus={e=>e.target.style.borderColor="#B87333"}
+            onBlur={e=>e.target.style.borderColor="#E0D5CA"}/>
+        </div>
+
+        {/* Author */}
+        <div style={{marginBottom:24}}>
+          <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:6,display:"block"}}>记录者</label>
+          <div style={{display:"flex",gap:8}}>
+            {USERS.map(u=><button key={u} onClick={()=>set("author",u)} style={{
+              flex:1,padding:"10px 0",borderRadius:10,fontSize:14,fontWeight:600,
+              cursor:"pointer",transition:"all .2s",
+              background:form.author===u?"linear-gradient(135deg,#B87333,#D4A574)":"#F5EDE5",
+              color:form.author===u?"#fff":"#8B7355",
+              border:form.author===u?"1.5px solid #B87333":"1.5px solid #E0D5CA",
+            }}>{u}</button>)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════ MAIN ═══════════════ */
+export default function CafeJournal() {
+  const [view,setView]=useState("list");
+  const [entries,setEntries]=useState([]);
+  const [sel,setSel]=useState(null);
+  const [editEntry,setEditEntry]=useState(null);
+  const [prefill,setPrefill]=useState(null);
+  const [user,setUser]=useState("Cyan");
+  const [loading,setLoading]=useState(true);
+  const [filter,setFilter]=useState("all");
+  const [search,setSearch]=useState("");
+  const [toast,setToast]=useState("");
+  const [storageOk,setStorageOk]=useState(null);
+
+  const flash=useCallback((m)=>{setToast(m);setTimeout(()=>setToast(""),2200);},[]);
+
+  // Test & load storage
+  useEffect(()=>{
+    (async()=>{
+      // Test storage
+      let ok=false;
+      try {
+        const testResult = await storageSet("_test","1");
+        if(testResult) {
+          const g = await storageGet("_test");
+          ok = g && g.value==="1";
+          try{await storageDelete("_test");}catch(e){}
+        }
+      } catch(e){ ok=false; }
+      setStorageOk(ok);
+
+      // Load entries
+      if(ok) {
+        try {
+          const r = await storageGet("cj_entries");
+          if(r) {
+            const parsed = JSON.parse(r.value);
+            // Hydrate images
+            const hydrated = await Promise.all(parsed.map(async e=>{
+              if(e.hasImage) {
+                try {
+                  const imgR = await storageGet("cj_img_"+e.id);
+                  return {...e, image: imgR?.value || null};
+                } catch(err) { return {...e, image:null}; }
+              }
+              return e;
+            }));
+            setEntries(hydrated);
+          }
+        } catch(e) {}
+      }
+      setLoading(false);
+    })();
+  },[]);
+
+  async function persist(newEntries) {
+    setEntries(newEntries);
+    if(!storageOk) { flash("⚠️ 存储不可用，重启后数据会丢失"); return false; }
+    try {
+      // Strip images, store separately
+      const stripped = newEntries.map(e=>({...e, image:undefined, hasImage:!!e.image}));
+      const result = await storageSet("cj_entries", JSON.stringify(stripped));
+      if(!result) { flash("❌ 保存失败"); return false; }
+      // Verify
+      const verify = await storageGet("cj_entries");
+      if(!verify) { flash("❌ 验证失败"); return false; }
+      // Save images
+      for(const e of newEntries) {
+        if(e.image && !e.image.startsWith("cj_")) {
+          try { await storageSet("cj_img_"+e.id, e.image); } catch(err){}
+        }
+      }
+      return true;
+    } catch(e) { flash("❌ 保存出错了"); return false; }
+  }
+
+  async function addEntry(entry) {
+    const updated = [entry,...entries];
+    if(await persist(updated)) { flash("☕ 记下来了"); setView("list"); setPrefill(null); }
+  }
+
+  async function updateEntry(entry) {
+    const updated = entries.map(e=>e.id===entry.id?entry:e);
+    if(await persist(updated)) { flash("✏️ 已更新"); setSel(entry); setView("detail"); setEditEntry(null); }
+  }
+
+  async function deleteEntry(id) {
+    const updated = entries.filter(e=>e.id!==id);
+    await persist(updated);
+    try{await storageDelete("cj_img_"+id);}catch(e){}
+    flash("🗑 删掉了"); setView("list"); setSel(null);
+  }
+
+  const filtered = (filter==="all"?entries:entries.filter(e=>e.author===filter))
+    .filter(e=>!search || (e.station||"").includes(search) || (e.shopName||"").includes(search));
+
+  // ─── EDIT VIEW ───
+  if(view==="edit" && editEntry) {
+    return <Form initial={editEntry} isEdit onSave={updateEntry}
+      onBack={()=>{setView("detail");setEditEntry(null);}} currentUser={user}/>;
+  }
+
+  // ─── ADD VIEW ───
+  if(view==="add") {
+    return <Form initial={prefill} onSave={addEntry}
+      onBack={()=>{setView("list");setPrefill(null);}} currentUser={user}/>;
+  }
+
+  // ─── DETAIL VIEW ───
+  if(view==="detail" && sel) {
+    return <Detail entry={sel} entries={entries} onBack={()=>setView("list")}
+      onDelete={()=>deleteEntry(sel.id)}
+      onEdit={()=>{setEditEntry(sel);setView("edit");}}
+      onAgain={()=>{setPrefill({shopName:sel.shopName,station:sel.station,
+        category:sel.category,temp:sel.temp,author:user});setView("add");}}/>;
+  }
+
+  // ─── LIST VIEW ───
+  return (
+    <div style={{minHeight:"100vh",background:"#FBF7F2"}}>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&display=swap" rel="stylesheet"/>
+      <style>{`@keyframes tIn{from{opacity:0;transform:translateX(-50%) translateY(-8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}`}</style>
+      {toast && <Toast msg={toast}/>}
+
+      <div style={{padding:"22px 18px 10px",position:"sticky",top:0,zIndex:10,
+        background:"rgba(251,247,242,.92)",backdropFilter:"blur(10px)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+          <div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:28,fontWeight:700,
+              color:"#2C1810",lineHeight:1}}>Café Journal</div>
+            <div style={{fontSize:11,color:"#A08B7A",marginTop:3,letterSpacing:2}}>
+              {entries.length} 杯记忆
+              {storageOk===false && <span style={{color:"#CF6B4E",marginLeft:6}}>· 存储不可用</span>}
+              {storageOk===true && <span style={{color:"#6BB86B",marginLeft:6}}>· ✓</span>}
+            </div>
+          </div>
+          <button onClick={()=>setView("add")} style={{
+            background:"linear-gradient(135deg,#B87333,#D4A574)",color:"#fff",border:"none",
+            borderRadius:"50%",width:42,height:42,fontSize:22,cursor:"pointer",
+            boxShadow:"0 4px 14px rgba(184,115,51,.3)",
+            display:"flex",alignItems:"center",justifyContent:"center",
+          }}>+</button>
+        </div>
+
+        {/* Search */}
+        <input value={search} onChange={e=>setSearch(e.target.value)}
+          placeholder="🔍 搜店名或地铁站..."
+          style={{width:"100%",padding:"8px 14px",border:"1.5px solid #E8DDD4",
+            borderRadius:10,fontSize:13,color:"#2C1810",outline:"none",marginTop:12,
+            background:"#FEFCFA",boxSizing:"border-box"}}
+          onFocus={e=>e.target.style.borderColor="#B87333"}
+          onBlur={e=>e.target.style.borderColor="#E8DDD4"}/>
+
+        {/* Filters */}
+        <div style={{display:"flex",gap:6,marginTop:10}}>
+          {[{key:"all",label:"全部"},...USERS.map(u=>({key:u,label:u}))].map(f=>
+            <button key={f.key} onClick={()=>setFilter(f.key)} style={{
+              padding:"4px 12px",borderRadius:18,fontSize:12,fontWeight:600,
+              cursor:"pointer",transition:"all .2s",
+              background:filter===f.key?"#2C1810":"transparent",
+              color:filter===f.key?"#FBF7F2":"#8B7355",
+              border:filter===f.key?"1.5px solid #2C1810":"1.5px solid #D4C8BB",
+            }}>{f.label}</button>
+          )}
+        </div>
+      </div>
+
+      <div style={{padding:"6px 18px 80px"}}>
+        {loading ? (
+          <div style={{textAlign:"center",padding:50,color:"#B0A090"}}>
+            <div style={{fontSize:22,marginBottom:6}}>☕</div>加载中...</div>
+        ) : filtered.length===0 ? (
+          <div style={{textAlign:"center",padding:50,color:"#B0A090"}}>
+            <div style={{fontSize:36,marginBottom:8,opacity:.4}}>☕</div>
+            <div style={{fontSize:14,fontWeight:500}}>{entries.length===0?"还没有记录":"没有匹配的结果"}</div>
+            <div style={{fontSize:12,color:"#C0B0A0",marginTop:3}}>
+              {entries.length===0?"点右上角 + 记下第一杯":"试试其他关键词？"}</div>
+          </div>
+        ) : (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            {filtered.map(e=><Card key={e.id} entry={e}
+              onClick={()=>{setSel(e);setView("detail");}}/>)}
+          </div>
+        )}
+      </div>
+
+      {/* User switcher */}
+      <div style={{position:"fixed",bottom:18,left:"50%",transform:"translateX(-50%)",
+        background:"rgba(44,24,16,.85)",backdropFilter:"blur(10px)",
+        borderRadius:26,padding:"5px 6px",display:"flex",gap:3,
+        boxShadow:"0 4px 18px rgba(44,24,16,.2)"}}>
+        {USERS.map(u=><button key={u} onClick={()=>setUser(u)} style={{
+          padding:"7px 16px",borderRadius:20,fontSize:12,fontWeight:600,
+          cursor:"pointer",transition:"all .2s",
+          background:user===u?"#B87333":"transparent",
+          color:user===u?"#fff":"rgba(255,255,255,.45)",border:"none",
+        }}>{u}</button>)}
+      </div>
+    </div>
+  );
+}
