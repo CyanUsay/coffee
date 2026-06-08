@@ -47,8 +47,8 @@ function tempEmoji(e) {
   return e.temp==="iced" ? "🧊 " : e.temp==="hot" ? "🔥 " : "";
 }
 
-function scoreColor(v,max=5) { return max===3 ? (REVISIT_COLORS[v]||"#ddd") : (SCORE_COLORS[v]||"#ddd"); }
-function scoreLabel(v,max=5) { return max===3 ? REVISIT_LABELS[v] : SCORE_LABELS[v]; }
+function scoreColor(v,max=5) { const i=Math.round(v); return max===3 ? (REVISIT_COLORS[i]||"#ddd") : (SCORE_COLORS[i]||"#ddd"); }
+function scoreLabel(v,max=5) { const i=Math.round(v); return max===3 ? REVISIT_LABELS[i] : SCORE_LABELS[i]; }
 
 /* ─── Toast ─── */
 function Toast({msg}) {
@@ -60,28 +60,52 @@ function Toast({msg}) {
 }
 
 /* ─── Star Rating (tier 1 = big, tier 2 = small) ─── */
+/* 支持半星：点星星左半 = .5，右半 = 整星（3.5 / 4 / 4.5 这样） */
 function Stars({value,max=5,onChange,tier=1}) {
   const [hover,setHover]=useState(0);
   const big = tier===1;
   const display = hover||value;
+  const size = big?28:18;
+  const fs = big?24:15;
+  const col = scoreColor(display,max);
   return (
     <div style={{display:"flex",alignItems:"center",gap:big?2:1}}>
       <div style={{display:"flex",gap:big?2:1}}>
         {Array.from({length:max},(_,i)=>{
-          const on = i<display;
-          return <button key={i} onClick={()=>onChange?.(i+1)}
-            onMouseEnter={()=>onChange&&setHover(i+1)} onMouseLeave={()=>setHover(0)}
-            style={{width:big?28:18,height:big?28:18,border:"none",background:"none",
-              cursor:onChange?"pointer":"default",fontSize:big?20:13,padding:0,
-              color:on?scoreColor(display,max):"#E0D5CA",
-              transition:"all .15s",transform:on?"scale(1.1)":"scale(.85)",
-              opacity:on?1:.4,lineHeight:1,
-            }}>★</button>;
+          const full = display >= i+1;
+          const half = !full && display >= i+0.5;
+          return (
+            <div key={i} style={{position:"relative",width:size,height:size,lineHeight:1,
+              cursor:onChange?"pointer":"default"}}>
+              {/* 底层空心星 */}
+              <span style={{position:"absolute",inset:0,fontSize:fs,color:"#E0D5CA",
+                display:"flex",alignItems:"center",justifyContent:"center"}}>★</span>
+              {/* 上层实心星：满星 100% 宽，半星裁到 50% */}
+              {(full||half) && (
+                <span style={{position:"absolute",top:0,left:0,height:"100%",overflow:"hidden",
+                  width:full?"100%":"50%"}}>
+                  <span style={{display:"flex",alignItems:"center",justifyContent:"center",
+                    width:size,height:"100%",fontSize:fs,color:col}}>★</span>
+                </span>
+              )}
+              {/* 点击 / 悬停热区：左半选 .5，右半选整数 */}
+              {onChange && <>
+                <button aria-label={`${i+0.5}分`} onClick={()=>onChange(i+0.5)}
+                  onMouseEnter={()=>setHover(i+0.5)} onMouseLeave={()=>setHover(0)}
+                  style={{position:"absolute",left:0,top:0,width:"50%",height:"100%",
+                    border:"none",background:"none",padding:0,cursor:"pointer"}}/>
+                <button aria-label={`${i+1}分`} onClick={()=>onChange(i+1)}
+                  onMouseEnter={()=>setHover(i+1)} onMouseLeave={()=>setHover(0)}
+                  style={{position:"absolute",right:0,top:0,width:"50%",height:"100%",
+                    border:"none",background:"none",padding:0,cursor:"pointer"}}/>
+              </>}
+            </div>
+          );
         })}
       </div>
       {value>0 && <span style={{fontSize:big?12:10,fontWeight:600,
         color:scoreColor(value,max),marginLeft:4,whiteSpace:"nowrap",
-      }}>{scoreLabel(value,max)}</span>}
+      }}>{scoreLabel(value,max)} {value}</span>}
     </div>
   );
 }
@@ -124,19 +148,26 @@ function ClickDots({value,max=5,onChange}) {
   );
 }
 
-/* ─── Dots (display only) ─── */
+/* ─── Dots (display only, 支持半格) ─── */
 function Dots({value,max=5,size=8}) {
+  const col = scoreColor(value,max);
   return <div style={{display:"flex",gap:2}}>
-    {Array.from({length:max},(_,i)=><div key={i} style={{
-      width:size,height:size,borderRadius:"50%",
-      background:i<value?scoreColor(value,max):"#E8DDD4",transition:"all .2s",
-    }}/>)}
+    {Array.from({length:max},(_,i)=>{
+      const full = value>=i+1;
+      const half = !full && value>=i+0.5;
+      return <div key={i} style={{position:"relative",width:size,height:size,borderRadius:"50%",
+        background:"#E8DDD4",overflow:"hidden"}}>
+        {(full||half) && <div style={{position:"absolute",left:0,top:0,height:"100%",
+          width:full?"100%":"50%",background:col,transition:"all .2s"}}/>}
+      </div>;
+    })}
   </div>;
 }
 
 /* ═══════════════ CARD ═══════════════ */
 function Card({entry,onClick}) {
-  const avg = entry.ratings ? ((entry.ratings.overall||0)).toFixed(0) : "–";
+  const ov = entry.ratings?.overall||0;
+  const avg = entry.ratings ? (Number.isInteger(ov) ? String(ov) : ov.toFixed(1)) : "–";
   return (
     <div onClick={onClick} style={{background:"#fff",borderRadius:16,overflow:"hidden",
       boxShadow:"0 2px 16px rgba(44,24,16,.07)",cursor:"pointer",transition:"all .25s",
@@ -179,6 +210,7 @@ function Card({entry,onClick}) {
 /* ═══════════════ DETAIL ═══════════════ */
 function Detail({entry,entries,onBack,onDelete,onEdit,onAgain}) {
   const sameShop = entries.filter(e=>e.id!==entry.id && e.shopName===entry.shopName);
+  const [confirmDel,setConfirmDel] = useState(false);
   return (
     <div style={{minHeight:"100vh",background:"#FBF7F2"}}>
       <div style={{height:200,background:entry.image?`url(${entry.image}) center/cover`
@@ -191,9 +223,9 @@ function Detail({entry,entries,onBack,onDelete,onEdit,onAgain}) {
           <button onClick={onEdit} style={{background:"rgba(255,255,255,.85)",backdropFilter:"blur(6px)",
             border:"none",borderRadius:"50%",width:36,height:36,cursor:"pointer",
             fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
-          <button onClick={onDelete} style={{background:"rgba(180,60,60,.75)",backdropFilter:"blur(6px)",
-            border:"none",borderRadius:"50%",width:36,height:36,cursor:"pointer",
-            fontSize:13,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+          <button onClick={()=>setConfirmDel(true)} style={{background:"rgba(180,60,60,.78)",backdropFilter:"blur(6px)",
+            border:"none",borderRadius:18,height:36,padding:"0 14px",cursor:"pointer",
+            fontSize:13,fontWeight:600,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>删除</button>
         </div>
         <div style={{position:"absolute",bottom:0,left:0,right:0,
           background:"linear-gradient(transparent,rgba(44,24,16,.55))",padding:"36px 18px 14px"}}>
@@ -278,6 +310,30 @@ function Detail({entry,entries,onBack,onDelete,onEdit,onAgain}) {
           </div>)}
         </>}
       </div>
+
+      {confirmDel && (
+        <div onClick={()=>setConfirmDel(false)} style={{position:"fixed",inset:0,zIndex:1000,
+          background:"rgba(44,24,16,.45)",backdropFilter:"blur(2px)",
+          display:"flex",alignItems:"center",justifyContent:"center",padding:24,
+          animation:"tIn .2s ease"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:18,
+            padding:"22px 20px 16px",maxWidth:300,width:"100%",
+            boxShadow:"0 12px 40px rgba(0,0,0,.25)"}}>
+            <div style={{fontSize:16,fontWeight:700,color:"#2C1810",marginBottom:6}}>删除这条记录？</div>
+            <div style={{fontSize:13,color:"#8B7355",lineHeight:1.6,marginBottom:18}}>
+              「{entry.shopName}」这一杯会被永久删除，无法恢复。
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setConfirmDel(false)} style={{flex:1,padding:"11px 0",
+                borderRadius:12,border:"1.5px solid #E8DDD4",background:"#F5EDE5",
+                color:"#8B7355",fontSize:14,fontWeight:600,cursor:"pointer"}}>取消</button>
+              <button onClick={()=>{setConfirmDel(false);onDelete();}} style={{flex:1,padding:"11px 0",
+                borderRadius:12,border:"none",background:"#C0453C",
+                color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>删除</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
