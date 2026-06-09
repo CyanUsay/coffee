@@ -305,6 +305,26 @@ function Composer({currentUser,onSubmit,onCancel,placeholder,compact}) {
   );
 }
 
+// 点赞条：夯中夯 👍🏻 / 我不中了 💀，只显示数量
+function ReactionBar({reactions,currentUser,onToggle,big}) {
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+      {REACTIONS.map(rx=>{
+        const users=(reactions&&reactions[rx.key])||[];
+        const me=users.includes(currentUser);
+        return <button key={rx.key} onClick={()=>onToggle(rx.key)} style={{
+          display:"flex",alignItems:"center",gap:4,padding:big?"6px 13px":"3px 9px",borderRadius:16,
+          fontSize:big?13:12,fontWeight:600,cursor:"pointer",transition:"all .15s",
+          border:`1px solid ${me?"#B87333":"#E8DDD4"}`,
+          background:me?"#FBEFE2":"#fff",color:me?"#B87333":"#8B7355"}}>
+          <span>{rx.emoji}</span><span>{rx.label}</span>
+          {users.length>0 && <span style={{fontWeight:700}}>{users.length}</span>}
+        </button>;
+      })}
+    </div>
+  );
+}
+
 function CommentNode({c,depth,currentUser,onReply,onReact}) {
   const [replying,setReplying]=useState(false);
   const col=userColor(c.author);
@@ -315,18 +335,8 @@ function CommentNode({c,depth,currentUser,onReply,onReact}) {
         <div style={{fontSize:12,fontWeight:700,color:col,marginBottom:2}}>{c.author}</div>
         <div style={{fontSize:13,color:"#3A2A1E",lineHeight:1.5,whiteSpace:"pre-wrap"}}>{c.text}</div>
       </div>
-      <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5,flexWrap:"wrap"}}>
-        {REACTIONS.map(rx=>{
-          const users=(c.reactions&&c.reactions[rx.key])||[];
-          const me=users.includes(currentUser);
-          return <button key={rx.key} onClick={()=>onReact(c.id,rx.key)} style={{
-            display:"flex",alignItems:"center",gap:3,padding:"3px 9px",borderRadius:14,
-            fontSize:12,fontWeight:600,cursor:"pointer",transition:"all .15s",
-            border:`1px solid ${me?"#B87333":"#E8DDD4"}`,
-            background:me?"#FBEFE2":"#fff",color:me?"#B87333":"#8B7355"}}>
-            <span>{rx.emoji}</span><span>{rx.label}</span>{users.length>0&&<span>{users.length}</span>}
-          </button>;
-        })}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginTop:5,flexWrap:"wrap"}}>
+        <ReactionBar reactions={c.reactions} currentUser={currentUser} onToggle={(t)=>onReact(c.id,t)}/>
         <button onClick={()=>setReplying(v=>!v)} style={{background:"none",border:"none",
           fontSize:12,color:"#A08B7A",fontWeight:600,cursor:"pointer"}}>回复</button>
       </div>
@@ -363,6 +373,12 @@ function Comments({comments,currentUser,onChange}) {
 function Detail({entry,entries,onBack,onDelete,onEdit,onAgain,onTag,onUpdateEntry,currentUser}) {
   const sameShop = entries.filter(e=>e.id!==entry.id && e.shopName===entry.shopName);
   const [confirmDel,setConfirmDel] = useState(false);
+  const toggleLike=(type)=>{
+    const r={up:[],skull:[],...(entry.likes||{})};
+    const arr=r[type]||[];
+    r[type]= arr.includes(currentUser)? arr.filter(u=>u!==currentUser) : [...arr, currentUser];
+    onUpdateEntry && onUpdateEntry({...entry, likes:r});
+  };
   return (
     <div style={{minHeight:"100vh",background:"#FBF7F2"}}>
       <div style={{height:200,background:entry.image?`url(${entry.image}) center/cover`
@@ -442,11 +458,15 @@ function Detail({entry,entries,onBack,onDelete,onEdit,onAgain,onTag,onUpdateEntr
           <span style={{fontSize:14,color:"#2C1810",fontWeight:600,marginLeft:6}}>{entry.nextDrink}</span>
         </div>}
 
-        {entry.notes && <div style={{background:"#fff",borderRadius:16,padding:14,marginBottom:12,
+        {/* 笔记 + 点赞（每条日志都能赞，只显示数量） */}
+        <div style={{background:"#fff",borderRadius:16,padding:14,marginBottom:12,
           boxShadow:"0 2px 12px rgba(44,24,16,.05)",border:"1px solid rgba(184,115,51,.06)"}}>
-          <div style={{fontSize:11,color:"#A08B7A",marginBottom:4,fontWeight:600}}>笔记</div>
-          <div style={{fontSize:13,color:"#5C4A3A",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{entry.notes}</div>
-        </div>}
+          {entry.notes ? <>
+            <div style={{fontSize:11,color:"#A08B7A",marginBottom:4,fontWeight:600}}>笔记</div>
+            <div style={{fontSize:13,color:"#5C4A3A",lineHeight:1.6,whiteSpace:"pre-wrap",marginBottom:10}}>{entry.notes}</div>
+          </> : null}
+          <ReactionBar big reactions={entry.likes} currentUser={currentUser} onToggle={toggleLike}/>
+        </div>
 
         {/* 追评 */}
         <Comments comments={entry.comments} currentUser={currentUser}
