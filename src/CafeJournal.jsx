@@ -180,9 +180,10 @@ function Stars({value,max=5,onChange,tier=1}) {
 
 /* ─── Revisit Buttons ─── */
 function RevisitPicker({value,onChange}) {
-  return <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+  return <div style={{display:"flex",gap:6,width:"100%"}}>
     {[1,2,3].map(v=><button key={v} onClick={()=>onChange?.(v)} style={{
-      padding:"6px 14px",borderRadius:20,fontSize:12,fontWeight:600,
+      flex:1,minWidth:0,whiteSpace:"nowrap",textAlign:"center",
+      padding:"7px 2px",borderRadius:20,fontSize:12,fontWeight:600,
       cursor:onChange?"pointer":"default",transition:"all .2s",
       background:value===v?REVISIT_COLORS[v]:"#F5EDE5",
       color:value===v?"#fff":"#A09080",
