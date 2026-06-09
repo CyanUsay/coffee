@@ -18,6 +18,69 @@ const RATINGS_META = [
   { key:"revisit", label:"再访意愿", emoji:"💜", max:3, tier:1 },
 ];
 
+// 两人的专属颜色：瑶 = 淡紫，Cyan = 青蓝
+const USER_COLORS = { "Cyan":"#2E9BC9", "瑶":"#B07ACC" };
+const USER_TINT   = { "Cyan":"#E9F4FA", "瑶":"#F3EAFA" };
+const userColor = (u)=> USER_COLORS[u] || "#8B7355";
+const userTint  = (u)=> USER_TINT[u]  || "#F5EDE5";
+
+// 追评的点赞反应
+const REACTIONS = [
+  { key:"up",    label:"夯中夯", emoji:"👍🏻" },
+  { key:"skull", label:"我不中了", emoji:"💀" },
+];
+
+// 日期处理：统一以 ISO(YYYY-MM-DD) 存储，显示成中文；兼容老的中文日期字符串
+function todayISO(){
+  const d=new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function toISO(s){
+  if(!s) return todayISO();
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const m = s.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/); // 解析「2026年6月9日」
+  if(m) return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+  return todayISO();
+}
+function fmtDate(s){
+  if(/^\d{4}-\d{2}-\d{2}/.test(s||"")){ const [y,mo,d]=s.slice(0,10).split("-"); return `${y}年${+mo}月${+d}日`; }
+  return s||""; // 老的中文日期原样显示
+}
+
+// 标签：把输入框里的字符串解析成统一带 # 的数组
+function parseTags(str){
+  if(!str) return [];
+  const out=[];
+  for(let t of str.split(/[\s,，]+/)){
+    t=t.trim().replace(/^#+/,"");
+    if(t){ const tag="#"+t; if(!out.includes(tag)) out.push(tag); }
+  }
+  return out;
+}
+
+// ─── 追评（评论树）纯函数工具，全部返回新对象，避免就地修改 ───
+const newId = ()=> Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+function addCommentTo(list, parentId, comment){
+  if(!parentId) return [...(list||[]), comment];
+  return (list||[]).map(c=> c.id===parentId
+    ? {...c, replies:[...(c.replies||[]), comment]}
+    : {...c, replies:addCommentTo(c.replies, parentId, comment)});
+}
+function toggleReactionIn(list, id, type, user){
+  return (list||[]).map(c=>{
+    if(c.id===id){
+      const r={up:[],skull:[],...(c.reactions||{})};
+      const arr=r[type]||[];
+      r[type]= arr.includes(user)? arr.filter(u=>u!==user) : [...arr, user];
+      return {...c, reactions:r};
+    }
+    return {...c, replies:toggleReactionIn(c.replies, id, type, user)};
+  });
+}
+function countComments(list){
+  return (list||[]).reduce((n,c)=> n+1+countComments(c.replies), 0);
+}
+
 function compress(file) {
   return new Promise(res => {
     const r = new FileReader();
@@ -191,7 +254,7 @@ function Card({entry,onClick}) {
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,
               color:"#2C1810",lineHeight:1.25,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
             }}>{entryEmoji(entry)}{entry.shopName}</div>
-            <div style={{fontSize:11,color:"#A08B7A",marginTop:2}}>{entry.date}</div>
+            <div style={{fontSize:11,color:"#A08B7A",marginTop:2}}>{fmtDate(entry.date)}</div>
             {entry.station && <div style={{fontSize:10,color:"#B8A898",marginTop:1}}>🚇 {entry.station}</div>}
           </div>
           <div style={{background:`linear-gradient(135deg,${scoreColor(entry.ratings?.overall||3)},${scoreColor(Math.min(5,(entry.ratings?.overall||3)+1))})`,
@@ -207,8 +270,97 @@ function Card({entry,onClick}) {
   );
 }
 
+/* ═══════════════ 追评 COMMENTS ═══════════════ */
+function Composer({currentUser,onSubmit,onCancel,placeholder,compact}) {
+  const [author,setAuthor]=useState(currentUser||USERS[0]);
+  const [text,setText]=useState("");
+  const submit=()=>{ const t=text.trim(); if(!t) return; onSubmit(author,t); setText(""); };
+  return (
+    <div style={{background:compact?"transparent":"#fff",borderRadius:14,padding:compact?0:14,
+      marginTop:compact?8:0,boxShadow:compact?"none":"0 2px 12px rgba(44,24,16,.05)",
+      border:compact?"none":"1px solid rgba(184,115,51,.06)"}}>
+      <div style={{display:"flex",gap:6,marginBottom:8}}>
+        {USERS.map(u=><button key={u} onClick={()=>setAuthor(u)} style={{
+          padding:"4px 12px",borderRadius:14,fontSize:12,fontWeight:700,cursor:"pointer",
+          transition:"all .2s",border:`1.5px solid ${author===u?userColor(u):"#E0D5CA"}`,
+          background:author===u?userColor(u):"transparent",
+          color:author===u?"#fff":"#8B7355"}}>{u}</button>)}
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+        <textarea value={text} onChange={e=>setText(e.target.value)} rows={compact?1:2}
+          placeholder={placeholder||"写条追评..."}
+          style={{flex:1,padding:"8px 12px",border:"1.5px solid #E0D5CA",borderRadius:10,
+            fontSize:13,color:"#2C1810",outline:"none",background:"#FEFCFA",resize:"vertical",
+            fontFamily:"inherit",lineHeight:1.5,boxSizing:"border-box"}}
+          onFocus={e=>e.target.style.borderColor=userColor(author)}
+          onBlur={e=>e.target.style.borderColor="#E0D5CA"}/>
+        <button onClick={submit} disabled={!text.trim()} style={{
+          background:text.trim()?userColor(author):"#E0D5CA",color:"#fff",border:"none",
+          borderRadius:10,padding:"8px 14px",fontSize:13,fontWeight:700,
+          cursor:text.trim()?"pointer":"default",flexShrink:0}}>发送</button>
+        {onCancel && <button onClick={onCancel} style={{background:"none",border:"none",
+          color:"#A08B7A",fontSize:12,cursor:"pointer",flexShrink:0}}>取消</button>}
+      </div>
+    </div>
+  );
+}
+
+function CommentNode({c,depth,currentUser,onReply,onReact}) {
+  const [replying,setReplying]=useState(false);
+  const col=userColor(c.author);
+  return (
+    <div style={{marginTop:10,marginLeft:depth>0?14:0,
+      paddingLeft:depth>0?10:0,borderLeft:depth>0?`2px solid ${col}33`:"none"}}>
+      <div style={{background:userTint(c.author),borderRadius:12,padding:"8px 12px"}}>
+        <div style={{fontSize:12,fontWeight:700,color:col,marginBottom:2}}>{c.author}</div>
+        <div style={{fontSize:13,color:"#3A2A1E",lineHeight:1.5,whiteSpace:"pre-wrap"}}>{c.text}</div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5,flexWrap:"wrap"}}>
+        {REACTIONS.map(rx=>{
+          const users=(c.reactions&&c.reactions[rx.key])||[];
+          const me=users.includes(currentUser);
+          return <button key={rx.key} onClick={()=>onReact(c.id,rx.key)} style={{
+            display:"flex",alignItems:"center",gap:3,padding:"3px 9px",borderRadius:14,
+            fontSize:12,fontWeight:600,cursor:"pointer",transition:"all .15s",
+            border:`1px solid ${me?"#B87333":"#E8DDD4"}`,
+            background:me?"#FBEFE2":"#fff",color:me?"#B87333":"#8B7355"}}>
+            <span>{rx.emoji}</span><span>{rx.label}</span>{users.length>0&&<span>{users.length}</span>}
+          </button>;
+        })}
+        <button onClick={()=>setReplying(v=>!v)} style={{background:"none",border:"none",
+          fontSize:12,color:"#A08B7A",fontWeight:600,cursor:"pointer"}}>回复</button>
+      </div>
+      {replying && <Composer compact currentUser={currentUser} placeholder={`回复 ${c.author}...`}
+        onCancel={()=>setReplying(false)}
+        onSubmit={(author,text)=>{ onReply(c.id,author,text); setReplying(false); }}/>}
+      {(c.replies||[]).map(r=><CommentNode key={r.id} c={r} depth={depth+1}
+        currentUser={currentUser} onReply={onReply} onReact={onReact}/>)}
+    </div>
+  );
+}
+
+function Comments({comments,currentUser,onChange}) {
+  const list = comments||[];
+  const addReply=(parentId,author,text)=>{
+    onChange(addCommentTo(list, parentId, {id:newId(),author,text,ts:Date.now(),reactions:{up:[],skull:[]},replies:[]}));
+  };
+  const react=(id,type)=> onChange(toggleReactionIn(list, id, type, currentUser));
+  return (
+    <div style={{marginTop:4,marginBottom:14}}>
+      <div style={{fontSize:13,fontWeight:700,color:"#2C1810",marginBottom:8}}>
+        追评 {list.length>0 && <span style={{color:"#A08B7A",fontWeight:600}}>({countComments(list)})</span>}
+      </div>
+      {list.map(c=><CommentNode key={c.id} c={c} depth={0}
+        currentUser={currentUser} onReply={addReply} onReact={react}/>)}
+      <div style={{marginTop:list.length>0?12:0}}>
+        <Composer currentUser={currentUser} onSubmit={(author,text)=>addReply(null,author,text)}/>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════ DETAIL ═══════════════ */
-function Detail({entry,entries,onBack,onDelete,onEdit,onAgain}) {
+function Detail({entry,entries,onBack,onDelete,onEdit,onAgain,onTag,onUpdateEntry,currentUser}) {
   const sameShop = entries.filter(e=>e.id!==entry.id && e.shopName===entry.shopName);
   const [confirmDel,setConfirmDel] = useState(false);
   return (
@@ -244,8 +396,16 @@ function Detail({entry,entries,onBack,onDelete,onEdit,onAgain}) {
       </div>
 
       <div style={{padding:"16px 18px 100px"}}>
-        <div style={{fontSize:12,color:"#A08B7A",marginBottom:4}}>{entry.date}</div>
-        {entry.station && <div style={{fontSize:12,color:"#8B7355",marginBottom:14}}>🚇 {entry.station}</div>}
+        <div style={{display:"flex",alignItems:"center",gap:10,fontSize:12,color:"#A08B7A",marginBottom:4}}>
+          <span>{fmtDate(entry.date)}</span>
+          {entry.price && <span style={{color:"#B87333",fontWeight:600}}>¥{entry.price}</span>}
+        </div>
+        {entry.station && <div style={{fontSize:12,color:"#8B7355",marginBottom:10}}>🚇 {entry.station}</div>}
+        {entry.tags && entry.tags.length>0 && <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+          {entry.tags.map(t=><button key={t} onClick={()=>onTag&&onTag(t)} style={{
+            background:"#F0E6DD",border:"1px solid #E0D0C0",borderRadius:14,padding:"3px 10px",
+            fontSize:12,color:"#8B6F4E",fontWeight:600,cursor:"pointer"}}>{t}</button>)}
+        </div>}
 
         <div style={{background:"#fff",borderRadius:16,padding:18,
           boxShadow:"0 2px 12px rgba(44,24,16,.05)",border:"1px solid rgba(184,115,51,.06)",marginBottom:12}}>
@@ -287,6 +447,10 @@ function Detail({entry,entries,onBack,onDelete,onEdit,onAgain}) {
           <div style={{fontSize:11,color:"#A08B7A",marginBottom:4,fontWeight:600}}>笔记</div>
           <div style={{fontSize:13,color:"#5C4A3A",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{entry.notes}</div>
         </div>}
+
+        {/* 追评 */}
+        <Comments comments={entry.comments} currentUser={currentUser}
+          onChange={(next)=> onUpdateEntry && onUpdateEntry({...entry, comments:next})}/>
 
         <button onClick={onAgain} style={{width:"100%",padding:"14px 0",borderRadius:14,
           background:"linear-gradient(135deg,#B87333,#D4A574)",color:"#fff",border:"none",
@@ -346,10 +510,13 @@ function Form({initial,onSave,onBack,currentUser,isEdit}) {
   // 没有 ratings —— 不补全的话渲染评分时会读到 undefined 直接崩溃白屏。
   const [form,setForm] = useState(() => ({
     shopName:"",category:"拿铁",specificName:"",station:"",notes:"",
-    image:null,author:currentUser,nextDrink:"",temp:"hot",
+    image:null,author:currentUser,nextDrink:"",temp:"hot",price:"",
     ...(initial||{}),
+    date: toISO(initial?.date),          // 默认今天，可改；编辑时兼容老的中文日期
+    price: (initial&&initial.price)||"",
     ratings:{...DEFAULT_RATINGS, ...((initial&&initial.ratings)||{})},
   }));
+  const [tagInput,setTagInput] = useState(()=> ((initial&&initial.tags)||[]).join(" "));
   const [saving,setSaving] = useState(false);
   const [ratingToast,setRatingToast] = useState("");
 
@@ -371,10 +538,8 @@ function Form({initial,onSave,onBack,currentUser,isEdit}) {
   async function handleSave() {
     if(!form.shopName.trim()) return;
     setSaving(true);
-    const entry = isEdit ? {...form} : {
-      ...form, id: Date.now().toString(36)+Math.random().toString(36).slice(2,6),
-      date: new Date().toLocaleDateString("zh-CN",{year:"numeric",month:"long",day:"numeric"}),
-    };
+    const common = {...form, date:toISO(form.date), price:(form.price||"").trim(), tags:parseTags(tagInput)};
+    const entry = isEdit ? common : { ...common, id:newId() };
     await onSave(entry);
     setSaving(false);
   }
@@ -451,20 +616,30 @@ function Form({initial,onSave,onBack,currentUser,isEdit}) {
           </div>
         </div>
 
-        {/* Hot / Iced */}
-        <div style={{marginBottom:14}}>
-          <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:5,display:"block"}}>温度</label>
-          <div style={{display:"flex",gap:8}}>
-            {TEMPS.map(t=>{
-              const on = form.temp===t.k;
-              return <button key={t.k} onClick={()=>set("temp",t.k)} style={{
-                flex:1,padding:"9px 0",borderRadius:10,fontSize:14,fontWeight:600,
-                cursor:"pointer",transition:"all .2s",
-                background:on?t.color:"#F5EDE5",
-                color:on?"#fff":"#8B7355",
-                border:on?`1.5px solid ${t.color}`:"1.5px solid #E0D5CA",
-              }}>{t.label}</button>;
-            })}
+        {/* 温度（占一半） + 价格（另一半，选填） */}
+        <div style={{display:"flex",gap:10,marginBottom:14}}>
+          <div style={{flex:1}}>
+            <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:5,display:"block"}}>温度</label>
+            <div style={{display:"flex",gap:6}}>
+              {TEMPS.map(t=>{
+                const on = form.temp===t.k;
+                return <button key={t.k} onClick={()=>set("temp",t.k)} style={{
+                  flex:1,padding:"9px 0",borderRadius:10,fontSize:13,fontWeight:600,
+                  cursor:"pointer",transition:"all .2s",
+                  background:on?t.color:"#F5EDE5",
+                  color:on?"#fff":"#8B7355",
+                  border:on?`1.5px solid ${t.color}`:"1.5px solid #E0D5CA",
+                }}>{t.label}</button>;
+              })}
+            </div>
+          </div>
+          <div style={{flex:1}}>
+            <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:5,display:"block"}}>
+              价格 <span style={{fontWeight:400,color:"#C0B0A0"}}>选填</span></label>
+            <input type="number" inputMode="decimal" value={form.price}
+              onChange={e=>set("price",e.target.value)} placeholder="¥ 多少钱" style={inp}
+              onFocus={e=>e.target.style.borderColor="#B87333"}
+              onBlur={e=>e.target.style.borderColor="#E0D5CA"}/>
           </div>
         </div>
 
@@ -474,6 +649,14 @@ function Form({initial,onSave,onBack,currentUser,isEdit}) {
             🚇 最近地铁站 <span style={{fontWeight:400,color:"#C0B0A0"}}>选填</span></label>
           <input value={form.station} onChange={e=>set("station",e.target.value)}
             placeholder="XX站" style={inp}
+            onFocus={e=>e.target.style.borderColor="#B87333"}
+            onBlur={e=>e.target.style.borderColor="#E0D5CA"}/>
+        </div>
+
+        {/* 日期（默认今天，可改） */}
+        <div style={{marginBottom:18}}>
+          <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:5,display:"block"}}>📅 日期</label>
+          <input type="date" value={form.date} onChange={e=>set("date",e.target.value)} style={inp}
             onFocus={e=>e.target.style.borderColor="#B87333"}
             onBlur={e=>e.target.style.borderColor="#E0D5CA"}/>
         </div>
@@ -513,6 +696,20 @@ function Form({initial,onSave,onBack,currentUser,isEdit}) {
             onFocus={e=>e.target.style.borderColor="#B07ACC"}
             onBlur={e=>e.target.style.borderColor="#D4C0E8"}/>
         </div>}
+
+        {/* 标签 */}
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:11,fontWeight:600,color:"#8B7355",marginBottom:5,display:"block"}}>
+            🏷 标签 <span style={{fontWeight:400,color:"#C0B0A0"}}>选填 · 空格分隔，如 #狗 #打工</span></label>
+          <input value={tagInput} onChange={e=>setTagInput(e.target.value)}
+            placeholder="#狗 #续命" style={inp}
+            onFocus={e=>e.target.style.borderColor="#B87333"}
+            onBlur={e=>e.target.style.borderColor="#E0D5CA"}/>
+          {parseTags(tagInput).length>0 && <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
+            {parseTags(tagInput).map(t=><span key={t} style={{background:"#F0E6DD",borderRadius:14,
+              padding:"2px 10px",fontSize:12,color:"#8B6F4E",fontWeight:600}}>{t}</span>)}
+          </div>}
+        </div>
 
         {/* Notes */}
         <div style={{marginBottom:18}}>
@@ -636,8 +833,19 @@ export default function CafeJournal() {
     flash("🗑 删掉了"); setView("list"); setSel(null);
   }
 
+  async function updateEntryInline(entry) {
+    setSel(entry);                                   // 立刻反映到详情页（追评等）
+    const updated = entries.map(e=>e.id===entry.id?entry:e);
+    await persist(updated);
+  }
+
+  const q = search.trim().toLowerCase();
+  const matchQ = (e)=> !q || [e.station,e.shopName,e.specificName,e.category,...(e.tags||[])]
+    .some(x=>(x||"").toLowerCase().includes(q));
   const filtered = (filter==="all"?entries:entries.filter(e=>e.author===filter))
-    .filter(e=>!search || (e.station||"").includes(search) || (e.shopName||"").includes(search));
+    .filter(matchQ)
+    .slice()
+    .sort((a,b)=> toISO(b.date).localeCompare(toISO(a.date))); // 按日期新→旧
 
   // ─── EDIT VIEW ───
   if(view==="edit" && editEntry) {
@@ -653,9 +861,11 @@ export default function CafeJournal() {
 
   // ─── DETAIL VIEW ───
   if(view==="detail" && sel) {
-    return <Detail entry={sel} entries={entries} onBack={()=>setView("list")}
+    return <Detail entry={sel} entries={entries} onBack={()=>setView("list")} currentUser={user}
       onDelete={()=>deleteEntry(sel.id)}
       onEdit={()=>{setEditEntry(sel);setView("edit");}}
+      onUpdateEntry={updateEntryInline}
+      onTag={(t)=>{setSearch(t.replace(/^#/,""));setFilter("all");setView("list");}}
       onAgain={()=>{setPrefill({shopName:sel.shopName,station:sel.station,
         category:sel.category,temp:sel.temp,author:user});setView("add");}}/>;
   }
@@ -689,7 +899,7 @@ export default function CafeJournal() {
 
         {/* Search */}
         <input value={search} onChange={e=>setSearch(e.target.value)}
-          placeholder="🔍 搜店名或地铁站..."
+          placeholder="🔍 搜店名 / 咖啡 / #标签 / 地铁站..."
           style={{width:"100%",padding:"8px 14px",border:"1.5px solid #E8DDD4",
             borderRadius:10,fontSize:13,color:"#2C1810",outline:"none",marginTop:12,
             background:"#FEFCFA",boxSizing:"border-box"}}
