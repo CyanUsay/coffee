@@ -309,7 +309,6 @@ function Composer({currentUser,onSubmit,onCancel,placeholder,compact}) {
 function ReactionBar({reactions,currentUser,onToggle,big}) {
   const [open,setOpen]=useState(false);
   const r=reactions||{};
-  const meAny = REACTIONS.some(rx=>(r[rx.key]||[]).includes(currentUser));
   const active = REACTIONS.filter(rx=>(r[rx.key]||[]).length>0);
   const pad = big?"6px 12px":"4px 10px";
   const fs  = big?14:13;
@@ -335,21 +334,24 @@ function ReactionBar({reactions,currentUser,onToggle,big}) {
     );
   }
 
-  // 收起态：一个 👍🏻 触发按钮 + 已有反应的小计数
+  // 收起态：没人点 → 只一个 👍🏻；已有反应 → 直接显示带文字的反应胶囊（如「👍🏻 夯中夯 1」）
   return (
     <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-      <button onClick={()=>setOpen(true)} style={{
-        display:"flex",alignItems:"center",gap:3,padding:pad,borderRadius:16,
-        fontSize:fs,cursor:"pointer",transition:"all .15s",
-        border:`1px solid ${meAny?"#B87333":"#E8DDD4"}`,
-        background:meAny?"#FBEFE2":"#fff"}}>👍🏻</button>
-      {active.map(rx=>{
+      {active.length===0 ? (
+        <button onClick={()=>setOpen(true)} style={{
+          display:"flex",alignItems:"center",gap:3,padding:pad,borderRadius:16,
+          fontSize:fs,cursor:"pointer",transition:"all .15s",
+          border:"1px solid #E8DDD4",background:"#fff"}}>👍🏻</button>
+      ) : active.map(rx=>{
         const users=r[rx.key]; const me=users.includes(currentUser);
-        return <span key={rx.key} onClick={()=>setOpen(true)} style={{
-          display:"flex",alignItems:"center",gap:3,fontSize:fs-1,cursor:"pointer",
-          color:me?"#B87333":"#8B7355",fontWeight:me?700:500}}>
-          <span>{rx.emoji}</span><span>{users.length}</span>
-        </span>;
+        return <button key={rx.key} onClick={()=>setOpen(true)} style={{
+          display:"flex",alignItems:"center",gap:4,padding:pad,borderRadius:16,
+          fontSize:fs-1,fontWeight:600,cursor:"pointer",transition:"all .15s",
+          border:`1px solid ${me?"#B87333":"#E8DDD4"}`,
+          background:me?"#FBEFE2":"#fff",color:me?"#B87333":"#8B7355"}}>
+          <span>{rx.emoji}</span><span>{rx.label}</span>
+          <span style={{fontWeight:700}}>{users.length}</span>
+        </button>;
       })}
     </div>
   );
