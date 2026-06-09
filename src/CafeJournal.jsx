@@ -305,21 +305,51 @@ function Composer({currentUser,onSubmit,onCancel,placeholder,compact}) {
   );
 }
 
-// 点赞条：夯中夯 👍🏻 / 我不中了 💀，只显示数量
+// 点赞条：默认只显示一个 👍🏻，点开才出现「夯中夯 / 我不中了」选项；只显示数量
 function ReactionBar({reactions,currentUser,onToggle,big}) {
+  const [open,setOpen]=useState(false);
+  const r=reactions||{};
+  const meAny = REACTIONS.some(rx=>(r[rx.key]||[]).includes(currentUser));
+  const active = REACTIONS.filter(rx=>(r[rx.key]||[]).length>0);
+  const pad = big?"6px 12px":"4px 10px";
+  const fs  = big?14:13;
+  const pick=(k)=>{ onToggle(k); setOpen(false); };
+
+  if(open){
+    return (
+      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+        {REACTIONS.map(rx=>{
+          const users=r[rx.key]||[]; const me=users.includes(currentUser);
+          return <button key={rx.key} onClick={()=>pick(rx.key)} style={{
+            display:"flex",alignItems:"center",gap:4,padding:pad,borderRadius:16,
+            fontSize:fs-1,fontWeight:600,cursor:"pointer",transition:"all .15s",
+            border:`1px solid ${me?"#B87333":"#E8DDD4"}`,
+            background:me?"#FBEFE2":"#fff",color:me?"#B87333":"#8B7355"}}>
+            <span>{rx.emoji}</span><span>{rx.label}</span>
+            {users.length>0 && <span style={{fontWeight:700}}>{users.length}</span>}
+          </button>;
+        })}
+        <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",
+          color:"#B0A090",fontSize:16,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+      </div>
+    );
+  }
+
+  // 收起态：一个 👍🏻 触发按钮 + 已有反应的小计数
   return (
     <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-      {REACTIONS.map(rx=>{
-        const users=(reactions&&reactions[rx.key])||[];
-        const me=users.includes(currentUser);
-        return <button key={rx.key} onClick={()=>onToggle(rx.key)} style={{
-          display:"flex",alignItems:"center",gap:4,padding:big?"6px 13px":"3px 9px",borderRadius:16,
-          fontSize:big?13:12,fontWeight:600,cursor:"pointer",transition:"all .15s",
-          border:`1px solid ${me?"#B87333":"#E8DDD4"}`,
-          background:me?"#FBEFE2":"#fff",color:me?"#B87333":"#8B7355"}}>
-          <span>{rx.emoji}</span><span>{rx.label}</span>
-          {users.length>0 && <span style={{fontWeight:700}}>{users.length}</span>}
-        </button>;
+      <button onClick={()=>setOpen(true)} style={{
+        display:"flex",alignItems:"center",gap:3,padding:pad,borderRadius:16,
+        fontSize:fs,cursor:"pointer",transition:"all .15s",
+        border:`1px solid ${meAny?"#B87333":"#E8DDD4"}`,
+        background:meAny?"#FBEFE2":"#fff"}}>👍🏻</button>
+      {active.map(rx=>{
+        const users=r[rx.key]; const me=users.includes(currentUser);
+        return <span key={rx.key} onClick={()=>setOpen(true)} style={{
+          display:"flex",alignItems:"center",gap:3,fontSize:fs-1,cursor:"pointer",
+          color:me?"#B87333":"#8B7355",fontWeight:me?700:500}}>
+          <span>{rx.emoji}</span><span>{users.length}</span>
+        </span>;
       })}
     </div>
   );
