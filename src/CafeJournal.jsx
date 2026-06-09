@@ -80,6 +80,11 @@ function toggleReactionIn(list, id, type, user){
 function countComments(list){
   return (list||[]).reduce((n,c)=> n+1+countComments(c.replies), 0);
 }
+function editCommentIn(list, id, text){
+  return (list||[]).map(c=> c.id===id
+    ? {...c, text, edited:true}
+    : {...c, replies:editCommentIn(c.replies, id, text)});
+}
 
 function compress(file) {
   return new Promise(res => {
@@ -357,26 +362,49 @@ function ReactionBar({reactions,currentUser,onToggle,big}) {
   );
 }
 
-function CommentNode({c,depth,currentUser,onReply,onReact}) {
+function CommentNode({c,depth,currentUser,onReply,onReact,onEdit}) {
   const [replying,setReplying]=useState(false);
+  const [editing,setEditing]=useState(false);
+  const [draft,setDraft]=useState(c.text);
   const col=userColor(c.author);
   return (
     <div style={{marginTop:10,marginLeft:depth>0?14:0,
       paddingLeft:depth>0?10:0,borderLeft:depth>0?`2px solid ${col}33`:"none"}}>
       <div style={{background:userTint(c.author),borderRadius:12,padding:"8px 12px"}}>
-        <div style={{fontSize:12,fontWeight:700,color:col,marginBottom:2}}>{c.author}</div>
-        <div style={{fontSize:13,color:"#3A2A1E",lineHeight:1.5,whiteSpace:"pre-wrap"}}>{c.text}</div>
+        <div style={{fontSize:12,fontWeight:700,color:col,marginBottom:2}}>
+          {c.author}{c.edited && <span style={{fontWeight:400,color:"#B0A090",fontSize:11}}> · 已编辑</span>}
+        </div>
+        {editing ? (
+          <div>
+            <textarea value={draft} onChange={e=>setDraft(e.target.value)} rows={2} autoFocus
+              style={{width:"100%",padding:"6px 10px",border:`1.5px solid ${col}`,borderRadius:8,
+                fontSize:13,color:"#2C1810",outline:"none",background:"#fff",resize:"vertical",
+                fontFamily:"inherit",lineHeight:1.5,boxSizing:"border-box"}}/>
+            <div style={{display:"flex",gap:8,marginTop:6}}>
+              <button onClick={()=>{ const t=draft.trim(); if(t){onEdit(c.id,t);} setEditing(false); }}
+                disabled={!draft.trim()} style={{background:draft.trim()?col:"#E0D5CA",color:"#fff",
+                border:"none",borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,
+                cursor:draft.trim()?"pointer":"default"}}>保存</button>
+              <button onClick={()=>{setDraft(c.text);setEditing(false);}} style={{background:"none",
+                border:"none",color:"#A08B7A",fontSize:12,cursor:"pointer"}}>取消</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{fontSize:13,color:"#3A2A1E",lineHeight:1.5,whiteSpace:"pre-wrap"}}>{c.text}</div>
+        )}
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8,marginTop:5,flexWrap:"wrap"}}>
         <ReactionBar reactions={c.reactions} currentUser={currentUser} onToggle={(t)=>onReact(c.id,t)}/>
         <button onClick={()=>setReplying(v=>!v)} style={{background:"none",border:"none",
           fontSize:12,color:"#A08B7A",fontWeight:600,cursor:"pointer"}}>回复</button>
+        <button onClick={()=>{setDraft(c.text);setEditing(v=>!v);setReplying(false);}} style={{background:"none",border:"none",
+          fontSize:12,color:"#A08B7A",fontWeight:600,cursor:"pointer"}}>编辑</button>
       </div>
       {replying && <Composer compact currentUser={currentUser} placeholder={`回复 ${c.author}...`}
         onCancel={()=>setReplying(false)}
         onSubmit={(author,text)=>{ onReply(c.id,author,text); setReplying(false); }}/>}
       {(c.replies||[]).map(r=><CommentNode key={r.id} c={r} depth={depth+1}
-        currentUser={currentUser} onReply={onReply} onReact={onReact}/>)}
+        currentUser={currentUser} onReply={onReply} onReact={onReact} onEdit={onEdit}/>)}
     </div>
   );
 }
@@ -387,13 +415,14 @@ function Comments({comments,currentUser,onChange}) {
     onChange(addCommentTo(list, parentId, {id:newId(),author,text,ts:Date.now(),reactions:{up:[],skull:[]},replies:[]}));
   };
   const react=(id,type)=> onChange(toggleReactionIn(list, id, type, currentUser));
+  const edit=(id,text)=> onChange(editCommentIn(list, id, text));
   return (
     <div style={{marginTop:4,marginBottom:14}}>
       <div style={{fontSize:13,fontWeight:700,color:"#2C1810",marginBottom:8}}>
         追评 {list.length>0 && <span style={{color:"#A08B7A",fontWeight:600}}>({countComments(list)})</span>}
       </div>
       {list.map(c=><CommentNode key={c.id} c={c} depth={0}
-        currentUser={currentUser} onReply={addReply} onReact={react}/>)}
+        currentUser={currentUser} onReply={addReply} onReact={react} onEdit={edit}/>)}
       <div style={{marginTop:list.length>0?12:0}}>
         <Composer currentUser={currentUser} onSubmit={(author,text)=>addReply(null,author,text)}/>
       </div>
