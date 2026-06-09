@@ -639,11 +639,7 @@ function Form({initial,onSave,onBack,currentUser,isEdit}) {
           cursor:"pointer",color:"#B87333",fontWeight:600}}>← 返回</button>
         <span style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,
           color:"#2C1810"}}>{isEdit?"编辑":"新的一杯"}</span>
-        <button onClick={handleSave} disabled={saving||!form.shopName.trim()} style={{
-          background:form.shopName.trim()?"linear-gradient(135deg,#B87333,#D4A574)":"#E0D5CA",
-          color:"#fff",border:"none",borderRadius:20,padding:"6px 16px",
-          fontSize:13,fontWeight:600,cursor:form.shopName.trim()?"pointer":"default",
-        }}>{saving?"…":"保存"}</button>
+        <span style={{width:48}}/>
       </div>
 
       <div style={{padding:18}}>
@@ -819,6 +815,16 @@ function Form({initial,onSave,onBack,currentUser,isEdit}) {
             }}>{u}</button>)}
           </div>
         </div>
+
+        {/* 保存 */}
+        <button onClick={handleSave} disabled={saving||!form.shopName.trim()} style={{
+          width:"100%",padding:"15px 0",borderRadius:14,marginBottom:8,
+          background:(form.shopName.trim()&&!saving)?"linear-gradient(135deg,#B87333,#D4A574)":"#E0D5CA",
+          color:"#fff",border:"none",fontSize:16,fontWeight:700,
+          cursor:(saving||!form.shopName.trim())?"default":"pointer",
+          boxShadow:"0 4px 16px rgba(184,115,51,.25)"}}>
+          {saving?"正在保存...":"保存"}
+        </button>
       </div>
     </div>
   );
