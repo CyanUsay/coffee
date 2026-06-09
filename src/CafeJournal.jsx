@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { storageGet, storageSet, storageDelete } from "./storage.js";
 
 const CATEGORIES = ["美式","拿铁","卡布奇诺","Flat White","Dirty","手冲","冷萃","摩卡","特调","其他"];
-const USERS = ["Cyan", "瑶"];
+const USERS = ["Cyan", "瑶", "guest"];
 const DEFAULT_RATINGS = {overall:0,aroma:0,flavor:0,environment:0,value:0,revisit:0};
 const TEMPS = [{k:"hot",label:"🔥 热",color:"#B87333"},{k:"iced",label:"🧊 冰",color:"#6BA0C8"}];
 const SCORE_LABELS = ["","难顶","不咋地","还行","不错","绝了"];
@@ -18,9 +18,9 @@ const RATINGS_META = [
   { key:"revisit", label:"再访意愿", emoji:"💜", max:3, tier:1 },
 ];
 
-// 两人的专属颜色：瑶 = 淡紫，Cyan = 青蓝
-const USER_COLORS = { "Cyan":"#2E9BC9", "瑶":"#B07ACC" };
-const USER_TINT   = { "Cyan":"#E9F4FA", "瑶":"#F3EAFA" };
+// 每个人的专属颜色：Cyan = 青蓝，瑶 = 淡紫，guest = 绿
+const USER_COLORS = { "Cyan":"#2E9BC9", "瑶":"#B07ACC", "guest":"#5DA271" };
+const USER_TINT   = { "Cyan":"#E9F4FA", "瑶":"#F3EAFA", "guest":"#EAF4EC" };
 const userColor = (u)=> USER_COLORS[u] || "#8B7355";
 const userTint  = (u)=> USER_TINT[u]  || "#F5EDE5";
 
