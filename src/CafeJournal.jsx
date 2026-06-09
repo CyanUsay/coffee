@@ -82,7 +82,7 @@ function countComments(list){
 }
 function editCommentIn(list, id, text){
   return (list||[]).map(c=> c.id===id
-    ? {...c, text, edited:true}
+    ? {...c, text}
     : {...c, replies:editCommentIn(c.replies, id, text)});
 }
 
@@ -371,9 +371,7 @@ function CommentNode({c,depth,currentUser,onReply,onReact,onEdit}) {
     <div style={{marginTop:10,marginLeft:depth>0?14:0,
       paddingLeft:depth>0?10:0,borderLeft:depth>0?`2px solid ${col}33`:"none"}}>
       <div style={{background:userTint(c.author),borderRadius:12,padding:"8px 12px"}}>
-        <div style={{fontSize:12,fontWeight:700,color:col,marginBottom:2}}>
-          {c.author}{c.edited && <span style={{fontWeight:400,color:"#B0A090",fontSize:11}}> · 已编辑</span>}
-        </div>
+        <div style={{fontSize:12,fontWeight:700,color:col,marginBottom:2}}>{c.author}</div>
         {editing ? (
           <div>
             <textarea value={draft} onChange={e=>setDraft(e.target.value)} rows={2} autoFocus
