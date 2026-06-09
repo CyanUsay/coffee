@@ -433,6 +433,7 @@ function Comments({comments,currentUser,onChange}) {
 function Detail({entry,entries,onBack,onDelete,onEdit,onAgain,onTag,onUpdateEntry,currentUser}) {
   const sameShop = entries.filter(e=>e.id!==entry.id && e.shopName===entry.shopName);
   const [confirmDel,setConfirmDel] = useState(false);
+  const [deleting,setDeleting] = useState(false);
   const toggleLike=(type)=>{
     const r={up:[],skull:[],...(entry.likes||{})};
     const arr=r[type]||[];
@@ -568,12 +569,13 @@ function Detail({entry,entries,onBack,onDelete,onEdit,onAgain,onTag,onUpdateEntr
               「{entry.shopName}」这一杯会被永久删除，无法恢复。
             </div>
             <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>setConfirmDel(false)} style={{flex:1,padding:"11px 0",
+              <button onClick={()=>setConfirmDel(false)} disabled={deleting} style={{flex:1,padding:"11px 0",
                 borderRadius:12,border:"1.5px solid #E8DDD4",background:"#F5EDE5",
-                color:"#8B7355",fontSize:14,fontWeight:600,cursor:"pointer"}}>取消</button>
-              <button onClick={()=>{setConfirmDel(false);onDelete();}} style={{flex:1,padding:"11px 0",
-                borderRadius:12,border:"none",background:"#C0453C",
-                color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>删除</button>
+                color:"#8B7355",fontSize:14,fontWeight:600,cursor:deleting?"default":"pointer"}}>取消</button>
+              <button onClick={async()=>{setDeleting(true); await onDelete();}} disabled={deleting} style={{flex:1,padding:"11px 0",
+                borderRadius:12,border:"none",background:deleting?"#D08A84":"#C0453C",
+                color:"#fff",fontSize:14,fontWeight:700,cursor:deleting?"default":"pointer"}}>
+                {deleting?"正在删除...":"删除"}</button>
             </div>
           </div>
         </div>
