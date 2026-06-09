@@ -4,7 +4,7 @@ import { storageGet, storageSet, storageDelete } from "./storage.js";
 const CATEGORIES = ["美式","拿铁","卡布奇诺","Flat White","Dirty","手冲","冷萃","摩卡","特调","其他"];
 const USERS = ["Cyan", "瑶", "guest"];
 const DEFAULT_RATINGS = {overall:0,aroma:0,flavor:0,environment:0,value:0,revisit:0};
-const TEMPS = [{k:"hot",label:"🔥 热",color:"#B87333"},{k:"iced",label:"🧊 冰",color:"#6BA0C8"}];
+const TEMPS = [{k:"hot",label:"🔥 Hot",color:"#B87333"},{k:"iced",label:"🧊 Ice",color:"#6BA0C8"}];
 const SCORE_LABELS = ["","难顶","不咋地","还行","不错","绝了"];
 const SCORE_COLORS = ["","#B0A0A0","#CF8E4E","#D4B347","#6BB86B","#C87E33"];
 const REVISIT_LABELS = ["","不想去了 🫠","还可以去 🤔","还想再去 💜"];
@@ -749,9 +749,13 @@ function Form({initial,onSave,onBack,currentUser,isEdit}) {
               padding:r.tier===1?"10px 0":"6px 0 6px 20px",
               borderBottom:i<RATINGS_META.length-1?"1px solid #F5EDE5":"none",
             }}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{display:"flex",
+                flexDirection:r.key==="revisit"?"column":"row",
+                justifyContent:"space-between",
+                alignItems:r.key==="revisit"?"flex-start":"center",
+                gap:r.key==="revisit"?10:8}}>
                 <span style={{fontSize:r.tier===1?13:12,fontWeight:r.tier===1?600:500,
-                  color:r.tier===1?"#2C1810":"#8B7355"}}>
+                  color:r.tier===1?"#2C1810":"#8B7355",whiteSpace:"nowrap"}}>
                   {r.emoji} {r.label}
                 </span>
                 {r.key==="revisit"
